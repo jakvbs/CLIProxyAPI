@@ -99,8 +99,9 @@ quota-exceeded:
 # Defaults and behavior for the OpenAI /v1/responses endpoint
 responses:
   # When true (default), allow model suffix to set reasoning.effort and strip suffix.
-  # Supported family: gpt-5 only
+  # Supported families: gpt-5 (minimal|low|medium|high) and gpt-5-codex (low|medium|high)
   # Example: gpt-5-high -> model: gpt-5, reasoning.effort: high
+  # Note: gpt-5-codex-minimal is ignored (no effort injected)
   infer-effort-from-model-suffix: true
   defaults:
     # Inject when client omits text.verbosity; allowed: low|medium|high

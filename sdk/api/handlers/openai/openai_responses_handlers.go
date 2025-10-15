@@ -168,12 +168,17 @@ func (h *OpenAIResponsesAPIHandler) preprocessResponsesRequest(body []byte) ([]b
 
     cfg := h.Cfg // *config.SDKConfig
 
-    // 1) Inject defaults when not supplied by client
+    // Derive base model and optional suffix once for feature gates below.
+    baseModel, _ := modelBaseAndSuffix(modelName)
+
+    // 1) Inject defaults when not supplied by client (with provider-specific skips)
     if cfg != nil {
-        // text.verbosity
-        if !gjson.GetBytes(body, "text.verbosity").Exists() && cfg.Responses.Defaults.Verbosity != "" {
-            if v := cfg.Responses.Defaults.Verbosity; v == "low" || v == "medium" || v == "high" {
-                body, _ = sjson.SetBytes(body, "text.verbosity", v)
+        // text.verbosity: do NOT send for gpt-5-codex family
+        if baseModel != "gpt-5-codex" {
+            if !gjson.GetBytes(body, "text.verbosity").Exists() && cfg.Responses.Defaults.Verbosity != "" {
+                if v := cfg.Responses.Defaults.Verbosity; v == "low" || v == "medium" || v == "high" {
+                    body, _ = sjson.SetBytes(body, "text.verbosity", v)
+                }
             }
         }
         // reasoning.summary
@@ -194,7 +199,15 @@ func (h *OpenAIResponsesAPIHandler) preprocessResponsesRequest(body []byte) ([]b
                 body, _ = sjson.SetBytes(body, "reasoning.effort", effort)
                 body, _ = sjson.SetBytes(body, "model", base)
                 modelName = base
+                baseModel = base
             }
+        }
+    }
+
+    // 3) For gpt-5-codex: ensure verbosity is not sent at all (remove if present)
+    if baseModel == "gpt-5-codex" {
+        if gjson.GetBytes(body, "text.verbosity").Exists() {
+            body, _ = sjson.DeleteBytes(body, "text.verbosity")
         }
     }
 
@@ -203,8 +216,8 @@ func (h *OpenAIResponsesAPIHandler) preprocessResponsesRequest(body []byte) ([]b
 
 // inferEffortFromModel parses supported model families with a suffix indicating effort
 // and returns base model, effort, and whether a mapping occurred.
-// Supported family: gpt-5 only (by requirement).
-// Supported suffixes: minimal, low, medium, high
+// Supported families: gpt-5 (minimal|low|medium|high), gpt-5-codex (low|medium|high).
+// Note: gpt-5-codex-minimal is intentionally unsupported.
 func inferEffortFromModel(model string) (string, string, bool) {
     if model == "" {
         return "", "", false
@@ -222,13 +235,45 @@ func inferEffortFromModel(model string) (string, string, bool) {
     }
     base := model[:idx]
     suffix := model[idx+1:]
-    switch suffix {
-    case "minimal", "low", "medium", "high":
-        if base == "gpt-5" {
+    switch base {
+    case "gpt-5":
+        switch suffix {
+        case "minimal", "low", "medium", "high":
+            return base, suffix, true
+        }
+    case "gpt-5-codex":
+        switch suffix {
+        case "low", "medium", "high":
             return base, suffix, true
         }
     }
     return "", "", false
+}
+
+// modelBaseAndSuffix returns base model and suffix when suffix is one of the
+// recognized effort values; otherwise returns model as base and empty suffix.
+func modelBaseAndSuffix(model string) (string, string) {
+    if model == "" {
+        return "", ""
+    }
+    idx := -1
+    for i := len(model) - 1; i >= 0; i-- {
+        if model[i] == '-' {
+            idx = i
+            break
+        }
+    }
+    if idx <= 0 || idx >= len(model)-1 {
+        return model, ""
+    }
+    base := model[:idx]
+    suffix := model[idx+1:]
+    switch suffix {
+    case "minimal", "low", "medium", "high":
+        return base, suffix
+    default:
+        return model, ""
+    }
 }
 
 func (h *OpenAIResponsesAPIHandler) forwardResponsesStream(c *gin.Context, flusher http.Flusher, cancel func(error), data <-chan []byte, errs <-chan *interfaces.ErrorMessage) {
