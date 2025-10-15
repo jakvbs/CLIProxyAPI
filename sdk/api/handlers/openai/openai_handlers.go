@@ -395,18 +395,20 @@ func convertChatCompletionsStreamChunkToCompletions(chunkData []byte) []byte {
 //   - c: The Gin context containing the HTTP request and response
 //   - rawJSON: The raw JSON bytes of the OpenAI-compatible request
 func (h *OpenAIAPIHandler) handleNonStreamingResponse(c *gin.Context, rawJSON []byte) {
-	c.Header("Content-Type", "application/json")
+    c.Header("Content-Type", "application/json")
 
-	modelName := gjson.GetBytes(rawJSON, "model").String()
-	cliCtx, cliCancel := h.GetContextWithCancel(h, c, context.Background())
-	resp, errMsg := h.ExecuteWithAuthManager(cliCtx, h.HandlerType(), modelName, rawJSON, h.GetAlt(c))
-	if errMsg != nil {
-		h.WriteErrorResponse(c, errMsg)
-		cliCancel(errMsg.Error)
-		return
-	}
-	_, _ = c.Writer.Write(resp)
-	cliCancel()
+    modelName := gjson.GetBytes(rawJSON, "model").String()
+    // Stash request body for verbose logging (independent from RequestLog flag)
+    c.Set("API_REQUEST", append([]byte(nil), rawJSON...))
+    cliCtx, cliCancel := h.GetContextWithCancel(h, c, context.Background())
+    resp, errMsg := h.ExecuteWithAuthManager(cliCtx, h.HandlerType(), modelName, rawJSON, h.GetAlt(c))
+    if errMsg != nil {
+        h.WriteErrorResponse(c, errMsg)
+        cliCancel(errMsg.Error)
+        return
+    }
+    _, _ = c.Writer.Write(resp)
+    cliCancel()
 }
 
 // handleStreamingResponse handles streaming responses for Gemini models.
@@ -434,10 +436,11 @@ func (h *OpenAIAPIHandler) handleStreamingResponse(c *gin.Context, rawJSON []byt
 		return
 	}
 
-	modelName := gjson.GetBytes(rawJSON, "model").String()
-	cliCtx, cliCancel := h.GetContextWithCancel(h, c, context.Background())
-	dataChan, errChan := h.ExecuteStreamWithAuthManager(cliCtx, h.HandlerType(), modelName, rawJSON, h.GetAlt(c))
-	h.handleStreamResult(c, flusher, func(err error) { cliCancel(err) }, dataChan, errChan)
+    modelName := gjson.GetBytes(rawJSON, "model").String()
+    c.Set("API_REQUEST", append([]byte(nil), rawJSON...))
+    cliCtx, cliCancel := h.GetContextWithCancel(h, c, context.Background())
+    dataChan, errChan := h.ExecuteStreamWithAuthManager(cliCtx, h.HandlerType(), modelName, rawJSON, h.GetAlt(c))
+    h.handleStreamResult(c, flusher, func(err error) { cliCancel(err) }, dataChan, errChan)
 }
 
 // handleCompletionsNonStreamingResponse handles non-streaming completions responses.

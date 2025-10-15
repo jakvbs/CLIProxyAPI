@@ -283,16 +283,22 @@ func cloneMetadata(src map[string]any) map[string]any {
 
 // WriteErrorResponse writes an error message to the response writer using the HTTP status embedded in the message.
 func (h *BaseAPIHandler) WriteErrorResponse(c *gin.Context, msg *interfaces.ErrorMessage) {
-	status := http.StatusInternalServerError
-	if msg != nil && msg.StatusCode > 0 {
-		status = msg.StatusCode
-	}
-	c.Status(status)
-	if msg != nil && msg.Error != nil {
-		_, _ = c.Writer.Write([]byte(msg.Error.Error()))
-	} else {
-		_, _ = c.Writer.Write([]byte(http.StatusText(status)))
-	}
+    status := http.StatusInternalServerError
+    if msg != nil && msg.StatusCode > 0 {
+        status = msg.StatusCode
+    }
+    // Expose error payload to Gin context for verbose logging, regardless of RequestLog flag.
+    if msg != nil && msg.Error != nil {
+        // Best-effort body snapshot for log
+        c.Set("API_RESPONSE", []byte(msg.Error.Error()))
+        c.Set("API_RESPONSE_ERROR", []*interfaces.ErrorMessage{msg})
+    }
+    c.Status(status)
+    if msg != nil && msg.Error != nil {
+        _, _ = c.Writer.Write([]byte(msg.Error.Error()))
+    } else {
+        _, _ = c.Writer.Write([]byte(http.StatusText(status)))
+    }
 }
 
 func (h *BaseAPIHandler) LoggingAPIResponseError(ctx context.Context, err *interfaces.ErrorMessage) {

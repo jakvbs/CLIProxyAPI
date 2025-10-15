@@ -11,6 +11,7 @@ import (
     "time"
 
     "github.com/gin-gonic/gin"
+    "github.com/router-for-me/CLIProxyAPI/v6/internal/interfaces"
     log "github.com/sirupsen/logrus"
     "github.com/tidwall/gjson"
 )
@@ -93,6 +94,23 @@ func emitVerbose5xxLog(c *gin.Context, status int, method, path string, latency 
     if v, ok := c.Get("API_RESPONSE"); ok {
         if b, okb := v.([]byte); okb {
             apiResp = b
+        }
+    }
+    // Fallback: use API_RESPONSE_ERROR when API_RESPONSE not available
+    if len(apiResp) == 0 {
+        if v, ok := c.Get("API_RESPONSE_ERROR"); ok {
+            if errs, okList := v.([]*interfaces.ErrorMessage); okList {
+                // join errors
+                var buf bytes.Buffer
+                for i := range errs {
+                    if errs[i] == nil || errs[i].Error == nil {
+                        continue
+                    }
+                    if buf.Len() > 0 { buf.WriteString("\n") }
+                    buf.WriteString(errs[i].Error.Error())
+                }
+                apiResp = buf.Bytes()
+            }
         }
     }
 
