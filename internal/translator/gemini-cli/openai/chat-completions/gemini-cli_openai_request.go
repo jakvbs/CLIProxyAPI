@@ -250,8 +250,36 @@ func ConvertOpenAIRequestToGeminiCLI(modelName string, inputRawJSON []byte, _ bo
 			if t.Get("type").String() == "function" {
 				fn := t.Get("function")
 				if fn.Exists() && fn.IsObject() {
-					parametersJsonSchema, _ := util.RenameKey(fn.Raw, "parameters", "parametersJsonSchema")
-					out, _ = sjson.SetRawBytes(out, fdPath+".-1", []byte(parametersJsonSchema))
+					fnJSON := fn.Raw
+					if prm := fn.Get("parameters"); prm.Exists() {
+						cleaned, _ := util.SanitizeSchemaForGemini(prm.Raw)
+						cleaned, _ = sjson.Set(cleaned, "type", "OBJECT")
+						pr := gjson.Parse(cleaned)
+						if props := pr.Get("properties"); props.Exists() {
+							props.ForEach(func(k, v gjson.Result) bool {
+								if tp := v.Get("type"); tp.Exists() {
+									cleaned, _ = sjson.Set(cleaned, "properties."+k.String()+".type", strings.ToUpper(tp.String()))
+								}
+								return true
+							})
+						}
+						fnJSON, _ = sjson.SetRaw(fnJSON, "parameters", cleaned)
+					} else if prm = fn.Get("parametersJsonSchema"); prm.Exists() {
+						cleaned, _ := util.SanitizeSchemaForGemini(prm.Raw)
+						cleaned, _ = sjson.Set(cleaned, "type", "OBJECT")
+						pr := gjson.Parse(cleaned)
+						if props := pr.Get("properties"); props.Exists() {
+							props.ForEach(func(k, v gjson.Result) bool {
+								if tp := v.Get("type"); tp.Exists() {
+									cleaned, _ = sjson.Set(cleaned, "properties."+k.String()+".type", strings.ToUpper(tp.String()))
+								}
+								return true
+							})
+						}
+						fnJSON, _ = sjson.SetRaw(fnJSON, "parameters", cleaned)
+						fnJSON, _ = sjson.Delete(fnJSON, "parametersJsonSchema")
+					}
+					out, _ = sjson.SetRawBytes(out, fdPath+".-1", []byte(fnJSON))
 				}
 			}
 		}
