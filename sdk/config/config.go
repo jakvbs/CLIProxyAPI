@@ -15,8 +15,11 @@ type SDKConfig struct {
 	// APIKeys is a list of keys for authenticating clients to this proxy server.
 	APIKeys []string `yaml:"api-keys" json:"api-keys"`
 
-	// Access holds request authentication provider configuration.
-	Access AccessConfig `yaml:"auth,omitempty" json:"auth,omitempty"`
+    // Access holds request authentication provider configuration.
+    Access AccessConfig `yaml:"auth,omitempty" json:"auth,omitempty"`
+
+    // Responses configures behavior specific to the OpenAI /v1/responses endpoint.
+    Responses ResponsesConfig `yaml:"responses,omitempty" json:"responses,omitempty"`
 }
 
 // AccessConfig groups request authentication providers.
@@ -70,13 +73,32 @@ func (c *SDKConfig) ConfigAPIKeyProvider() *AccessProvider {
 // MakeInlineAPIKeyProvider constructs an inline API key provider configuration.
 // It returns nil when no keys are supplied.
 func MakeInlineAPIKeyProvider(keys []string) *AccessProvider {
-	if len(keys) == 0 {
-		return nil
-	}
-	provider := &AccessProvider{
-		Name:    DefaultAccessProviderName,
-		Type:    AccessProviderTypeConfigAPIKey,
-		APIKeys: append([]string(nil), keys...),
-	}
-	return provider
+    if len(keys) == 0 {
+        return nil
+    }
+    provider := &AccessProvider{
+        Name:    DefaultAccessProviderName,
+        Type:    AccessProviderTypeConfigAPIKey,
+        APIKeys: append([]string(nil), keys...),
+    }
+    return provider
+}
+
+// ResponsesConfig groups defaults and feature flags for the /v1/responses endpoint.
+type ResponsesConfig struct {
+    // Defaults configures default values injected into requests when not provided by clients.
+    Defaults ResponsesDefaults `yaml:"defaults,omitempty" json:"defaults,omitempty"`
+    // InferEffortFromModelSuffix enables mapping model suffixes (e.g., gpt-5-high)
+    // to reasoning.effort and stripping the suffix from the model.
+    // When true, and the model family is supported, the suffix is converted into
+    // reasoning.effort unless the client already set reasoning.effort explicitly.
+    InferEffortFromModelSuffix bool `yaml:"infer-effort-from-model-suffix,omitempty" json:"infer-effort-from-model-suffix,omitempty"`
+}
+
+// ResponsesDefaults defines injectable defaults for /v1/responses.
+type ResponsesDefaults struct {
+    // Verbosity controls output verbosity for text responses: low|medium|high
+    Verbosity string `yaml:"verbosity,omitempty" json:"verbosity,omitempty"`
+    // ReasoningSummary selects level of reasoning summary returned: auto|detailed
+    ReasoningSummary string `yaml:"reasoning-summary,omitempty" json:"reasoning-summary,omitempty"`
 }

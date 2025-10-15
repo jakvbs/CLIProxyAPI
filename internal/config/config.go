@@ -183,6 +183,10 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	// Set defaults before unmarshal so that absent keys keep defaults.
 	cfg.LoggingToFile = false
 	cfg.UsageStatisticsEnabled = false
+	// Defaults for /v1/responses behavior
+	cfg.SDKConfig.Responses.InferEffortFromModelSuffix = true
+	cfg.SDKConfig.Responses.Defaults.Verbosity = "medium"
+	cfg.SDKConfig.Responses.Defaults.ReasoningSummary = "auto"
 	if err = yaml.Unmarshal(data, &cfg); err != nil {
 		if optional {
 			// In cloud deploy mode, if YAML parsing fails, return empty config instead of error.

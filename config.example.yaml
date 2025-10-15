@@ -79,3 +79,31 @@ quota-exceeded:
 #    models: # The models supported by the provider.
 #      - name: "moonshotai/kimi-k2:free" # The actual model name.
 #        alias: "kimi-k2" # The alias used in the API.
+
+# Gemini Web settings
+#gemini-web:
+#    # Conversation reuse: set to true to enable (default), false to disable.
+#    context: true
+#    # Maximum characters per single request to Gemini Web. Requests exceeding this
+#    # size split into chunks. Only the last chunk carries files and yields the final answer.
+#    max-chars-per-request: 1000000
+#    # Disable the short continuation hint appended to intermediate chunks
+#    # when splitting long prompts. Default is false (hint enabled by default).
+#    disable-continuation-hint: false
+#    # Gem selection (Gem Mode):
+#    #   - "coding-partner": attach the predefined Coding partner Gem
+#    #   - "writing-editor": attach the predefined Writing editor Gem
+#    #   - empty: do not attach any Gem
+#    gem-mode: ""
+
+# Defaults and behavior for the OpenAI /v1/responses endpoint
+responses:
+  # When true (default), allow model suffix to set reasoning.effort and strip suffix.
+  # Supported family: gpt-5 only
+  # Example: gpt-5-high -> model: gpt-5, reasoning.effort: high
+  infer-effort-from-model-suffix: true
+  defaults:
+    # Inject when client omits text.verbosity; allowed: low|medium|high
+    verbosity: medium
+    # Inject when client omits reasoning.summary; allowed: auto|detailed
+    reasoning-summary: auto
