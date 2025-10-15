@@ -124,20 +124,18 @@ func emitVerbose5xxLog(c *gin.Context, status int, method, path string, latency 
         }
     }
 
-    // Prepare safe excerpts to avoid log bloat
-    const max = 2048
-    reqExcerpt := safeExcerpt(apiReq, max)
-    respExcerpt := safeExcerpt(apiResp, max)
+    // For 5xx: include FULL provider error body, but omit request excerpt.
+    respExcerpt := safeExcerpt(apiResp, -1)
 
-    log.WithFields(log.Fields{
+    fields := log.Fields{
         "status":  status,
         "method":  method,
         "path":    path,
         "latency": latency.String(),
         "model":   model,
-        "api_request_excerpt":  reqExcerpt,
-        "api_response_excerpt": respExcerpt,
-    }).Error("request failed (verbose)")
+        "api_response": respExcerpt,
+    }
+    log.WithFields(fields).Error("request failed (verbose)")
 }
 
 // safeExcerpt returns at most n bytes of b as string, trimming whitespace and indicating truncation.
@@ -146,7 +144,7 @@ func safeExcerpt(b []byte, n int) string {
         return ""
     }
     s := bytes.TrimSpace(b)
-    if len(s) <= n {
+    if n <= 0 || len(s) <= n {
         return string(s)
     }
     head := s[:n]
