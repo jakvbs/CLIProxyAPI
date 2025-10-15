@@ -1,17 +1,18 @@
 package logging
 
 import (
-	"bytes"
-	"fmt"
-	"io"
-	"os"
-	"path/filepath"
-	"strings"
-	"sync"
+    "bytes"
+    "fmt"
+    "io"
+    "os"
+    "path/filepath"
+    "sort"
+    "strings"
+    "sync"
 
-	"github.com/gin-gonic/gin"
-	log "github.com/sirupsen/logrus"
-	"gopkg.in/natefinch/lumberjack.v2"
+    "github.com/gin-gonic/gin"
+    log "github.com/sirupsen/logrus"
+    "gopkg.in/natefinch/lumberjack.v2"
 )
 
 var (
@@ -37,10 +38,31 @@ func (m *LogFormatter) Format(entry *log.Entry) ([]byte, error) {
 
 	timestamp := entry.Time.Format("2006-01-02 15:04:05")
 	message := strings.TrimRight(entry.Message, "\r\n")
-	formatted := fmt.Sprintf("[%s] [%s] [%s:%d] %s\n", timestamp, entry.Level, filepath.Base(entry.Caller.File), entry.Caller.Line, message)
-	buffer.WriteString(formatted)
+    formatted := fmt.Sprintf("[%s] [%s] [%s:%d] %s", timestamp, entry.Level, filepath.Base(entry.Caller.File), entry.Caller.Line, message)
+    buffer.WriteString(formatted)
 
-	return buffer.Bytes(), nil
+    // Render structured fields as key=value pairs (sorted for stability).
+    if len(entry.Data) > 0 {
+        keys := make([]string, 0, len(entry.Data))
+        for k := range entry.Data {
+            keys = append(keys, k)
+        }
+        sort.Strings(keys)
+        for _, k := range keys {
+            v := entry.Data[k]
+            // Coerce to string while trimming newlines to keep one-line logs.
+            s := strings.TrimSpace(fmt.Sprintf("%v", v))
+            s = strings.ReplaceAll(s, "\n", "\\n")
+            buffer.WriteString(" ")
+            buffer.WriteString(k)
+            buffer.WriteString("=")
+            buffer.WriteString(s)
+        }
+    }
+
+    buffer.WriteString("\n")
+
+    return buffer.Bytes(), nil
 }
 
 // SetupBaseLogger configures the shared logrus instance and Gin writers.
