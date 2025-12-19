@@ -6,6 +6,7 @@ import (
 	"compress/flate"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -115,6 +116,9 @@ func (e *ClaudeExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, r
 		body = checkSystemInstructions(body)
 	}
 	body = applyPayloadConfigWithRoot(e.cfg, baseModel, to.String(), "", body, originalTranslated)
+	// Fix Claude Code bug: server_tool_use.input stored as string instead of object
+	// Placed after applyPayloadConfig to ensure no config rules reintroduce the bug
+	body = fixServerToolUseInput(body)
 
 	// Disable thinking if tool_choice forces tool use (Anthropic API constraint)
 	body = disableThinkingIfToolChoiceForced(body)
@@ -246,6 +250,9 @@ func (e *ClaudeExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 
 	body = checkSystemInstructions(body)
 	body = applyPayloadConfigWithRoot(e.cfg, baseModel, to.String(), "", body, originalTranslated)
+	// Fix Claude Code bug: server_tool_use.input stored as string instead of object
+	// Placed after applyPayloadConfig to ensure no config rules reintroduce the bug
+	body = fixServerToolUseInput(body)
 
 	// Disable thinking if tool_choice forces tool use (Anthropic API constraint)
 	body = disableThinkingIfToolChoiceForced(body)
@@ -398,6 +405,8 @@ func (e *ClaudeExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.Aut
 	stream := from != to
 	body := sdktranslator.TranslateRequest(from, to, baseModel, bytes.Clone(req.Payload), stream)
 	body, _ = sjson.SetBytes(body, "model", baseModel)
+	// Fix Claude Code bug: server_tool_use.input stored as string instead of object
+	body = fixServerToolUseInput(body)
 
 	if !strings.HasPrefix(baseModel, "claude-3-5-haiku") {
 		body = checkSystemInstructions(body)
@@ -777,6 +786,49 @@ func claudeCreds(a *cliproxyauth.Auth) (apiKey, baseURL string) {
 		}
 	}
 	return
+}
+
+// fixServerToolUseInput fixes a Claude Code client bug where server_tool_use.input
+// is stored as a JSON string instead of a parsed object. When Claude Code sends
+// conversation history with stringified input, the Claude API returns 400 error:
+// "messages.X.content.Y.server_tool_use.input: Input should be a valid dictionary"
+//
+// This function parses any stringified JSON inputs back into objects before
+// sending the request to the Claude API.
+func fixServerToolUseInput(body []byte) []byte {
+	msgs := gjson.GetBytes(body, "messages")
+	if !msgs.IsArray() {
+		return body
+	}
+	out := body
+	for mi, m := range msgs.Array() {
+		contents := m.Get("content")
+		if !contents.IsArray() {
+			continue
+		}
+		for ci, c := range contents.Array() {
+			if c.Get("type").String() != "server_tool_use" {
+				continue
+			}
+			input := c.Get("input")
+			// Only process if input is a string (the bug we're fixing)
+			if input.Type != gjson.String {
+				continue
+			}
+			s := strings.TrimSpace(input.String())
+			// Skip empty strings
+			if s == "" {
+				continue
+			}
+			// Validate it's valid JSON and specifically an object (not array/string/etc)
+			if !json.Valid([]byte(s)) || !gjson.Parse(s).IsObject() {
+				continue
+			}
+			// Replace the string with the parsed JSON object
+			out, _ = sjson.SetRawBytes(out, fmt.Sprintf("messages.%d.content.%d.input", mi, ci), []byte(s))
+		}
+	}
+	return out
 }
 
 func checkSystemInstructions(payload []byte) []byte {
