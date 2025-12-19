@@ -235,6 +235,8 @@ type PayloadConfig struct {
 type PayloadRule struct {
 	// Models lists model entries with name pattern and protocol constraint.
 	Models []PayloadModelRule `yaml:"models" json:"models"`
+	// Require lists JSON paths (gjson syntax) that must exist for the rule to apply.
+	Require []string `yaml:"require" json:"require"`
 	// Params maps JSON paths (gjson/sjson syntax) to values written into the payload.
 	// For *-raw rules, values are treated as raw JSON fragments (strings are used as-is).
 	Params map[string]any `yaml:"params" json:"params"`

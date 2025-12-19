@@ -13,6 +13,10 @@ import (
 	"github.com/tidwall/sjson"
 )
 
+func applyPayloadConfig(cfg *config.Config, model string, payload []byte) []byte {
+	return applyPayloadConfigWithRoot(cfg, model, "", "", payload, nil)
+}
+
 // applyPayloadConfigWithRoot behaves like applyPayloadConfig but treats all parameter
 // paths as relative to the provided root path (for example, "request" for Gemini CLI)
 // and restricts matches to the given protocol when supplied. Defaults are checked
@@ -49,6 +53,9 @@ func applyPayloadConfigWithRoot(cfg *config.Config, model, protocol, root string
 	for i := range rules.Default {
 		rule := &rules.Default[i]
 		if !payloadRuleMatchesModels(rule, protocol, candidates) {
+			continue
+		}
+		if !payloadRuleRequirementsMet(rule, root, out, debug) {
 			continue
 		}
 
@@ -108,6 +115,9 @@ func applyPayloadConfigWithRoot(cfg *config.Config, model, protocol, root string
 	for i := range rules.DefaultRaw {
 		rule := &rules.DefaultRaw[i]
 		if !payloadRuleMatchesModels(rule, protocol, candidates) {
+			continue
+		}
+		if !payloadRuleRequirementsMet(rule, root, out, debug) {
 			continue
 		}
 
@@ -172,6 +182,9 @@ func applyPayloadConfigWithRoot(cfg *config.Config, model, protocol, root string
 		if !payloadRuleMatchesModels(rule, protocol, candidates) {
 			continue
 		}
+		if !payloadRuleRequirementsMet(rule, root, out, debug) {
+			continue
+		}
 
 		// Phase 1: Resolve all query paths
 		resolvedPaths := make(map[string][]string)
@@ -221,6 +234,9 @@ func applyPayloadConfigWithRoot(cfg *config.Config, model, protocol, root string
 	for i := range rules.OverrideRaw {
 		rule := &rules.OverrideRaw[i]
 		if !payloadRuleMatchesModels(rule, protocol, candidates) {
+			continue
+		}
+		if !payloadRuleRequirementsMet(rule, root, out, debug) {
 			continue
 		}
 
@@ -307,6 +323,124 @@ func payloadRuleMatchesModel(rule *config.PayloadRule, model, protocol string) b
 		}
 	}
 	return false
+}
+
+func payloadRuleRequirementsMet(rule *config.PayloadRule, root string, payload []byte, debug bool) bool {
+	if rule == nil {
+		return false
+	}
+	if len(rule.Require) == 0 {
+		return true
+	}
+
+	var failed []string
+	for _, expr := range rule.Require {
+		path, wantValue, hasValue := splitRequirement(expr)
+		fullPath := buildPayloadPath(root, path)
+		if fullPath == "" {
+			continue
+		}
+		result := gjson.GetBytes(payload, fullPath)
+		if !hasValue {
+			if !result.Exists() {
+				failed = append(failed, expr)
+			}
+			continue
+		}
+		if !requirementValueMatches(result, wantValue) {
+			failed = append(failed, expr)
+		}
+	}
+
+	if len(failed) > 0 {
+		if debug {
+			log.Printf("[payload] rule requires unmet conditions: %v", failed)
+		}
+		return false
+	}
+	return true
+}
+
+func splitRequirement(expr string) (path, value string, hasValue bool) {
+	s := strings.TrimSpace(expr)
+	if s == "" {
+		return "", "", false
+	}
+	depth := 0
+	inQuote := false
+	var quote byte
+	escapeNext := false
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		if escapeNext {
+			escapeNext = false
+			continue
+		}
+		if inQuote {
+			if ch == '\\' {
+				escapeNext = true
+				continue
+			}
+			if ch == quote {
+				inQuote = false
+			}
+			continue
+		}
+		if ch == '"' || ch == '\'' {
+			inQuote = true
+			quote = ch
+			continue
+		}
+		switch ch {
+		case '(', '[':
+			depth++
+		case ')', ']':
+			if depth > 0 {
+				depth--
+			}
+		case '=':
+			if depth == 0 {
+				path = strings.TrimSpace(s[:i])
+				value = strings.TrimSpace(s[i+1:])
+				return path, value, true
+			}
+		}
+	}
+	return s, "", false
+}
+
+func requirementValueMatches(result gjson.Result, expected string) bool {
+	if !result.Exists() {
+		return false
+	}
+	raw := strings.TrimSpace(expected)
+	if raw == "" {
+		return result.Type == gjson.String && result.String() == ""
+	}
+
+	quoted := false
+	if len(raw) >= 2 {
+		if (raw[0] == '"' && raw[len(raw)-1] == '"') || (raw[0] == '\'' && raw[len(raw)-1] == '\'') {
+			quoted = true
+			raw = raw[1 : len(raw)-1]
+		}
+	}
+
+	if !quoted {
+		switch strings.ToLower(raw) {
+		case "true":
+			return result.Type == gjson.True
+		case "false":
+			return result.Type == gjson.False
+		case "null":
+			return result.Type == gjson.Null
+		}
+		if num, err := strconv.ParseFloat(raw, 64); err == nil {
+			return result.Type == gjson.Number && result.Float() == num
+		}
+	}
+
+	return result.Type == gjson.String && result.String() == raw
 }
 
 func payloadModelCandidates(cfg *config.Config, model, protocol string) []string {
