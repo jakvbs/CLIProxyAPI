@@ -34,12 +34,18 @@ import (
 // ClaudeExecutor is a stateless executor for Anthropic Claude over the messages API.
 // If api_key is unavailable on auth, it falls back to legacy via ClientAdapter.
 type ClaudeExecutor struct {
-	cfg *config.Config
+	cfg       *config.Config
+	toolCache *ToolCache
 }
 
 const claudeToolPrefix = "proxy_"
 
-func NewClaudeExecutor(cfg *config.Config) *ClaudeExecutor { return &ClaudeExecutor{cfg: cfg} }
+func NewClaudeExecutor(cfg *config.Config) *ClaudeExecutor {
+	return &ClaudeExecutor{
+		cfg:       cfg,
+		toolCache: NewToolCache(30 * time.Minute),
+	}
+}
 
 func (e *ClaudeExecutor) Identifier() string { return "claude" }
 
@@ -106,6 +112,8 @@ func (e *ClaudeExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, r
 	originalTranslated := sdktranslator.TranslateRequest(from, to, baseModel, originalPayload, stream)
 	body := sdktranslator.TranslateRequest(from, to, baseModel, bytes.Clone(req.Payload), stream)
 	body, _ = sjson.SetBytes(body, "model", baseModel)
+	// Rehydrate tools from cache if request is missing tools but references them in history
+	body = rehydrateTools(e.toolCache, body)
 
 	body, err = thinking.ApplyThinking(body, req.Model, "claude")
 	if err != nil {
@@ -242,12 +250,8 @@ func (e *ClaudeExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 	originalTranslated := sdktranslator.TranslateRequest(from, to, baseModel, originalPayload, true)
 	body := sdktranslator.TranslateRequest(from, to, baseModel, bytes.Clone(req.Payload), true)
 	body, _ = sjson.SetBytes(body, "model", baseModel)
-
-	body, err = thinking.ApplyThinking(body, req.Model, "claude")
-	if err != nil {
-		return nil, err
-	}
-
+	// Rehydrate tools from cache if request is missing tools but references them in history
+	body = rehydrateTools(e.toolCache, body)
 	body = checkSystemInstructions(body)
 	body = applyPayloadConfigWithRoot(e.cfg, baseModel, to.String(), "", body, originalTranslated)
 	// Fix Claude Code bug: server_tool_use.input stored as string instead of object
@@ -405,6 +409,8 @@ func (e *ClaudeExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.Aut
 	stream := from != to
 	body := sdktranslator.TranslateRequest(from, to, baseModel, bytes.Clone(req.Payload), stream)
 	body, _ = sjson.SetBytes(body, "model", baseModel)
+	// Rehydrate tools from cache if request is missing tools but references them in history
+	body = rehydrateTools(e.toolCache, body)
 	// Fix Claude Code bug: server_tool_use.input stored as string instead of object
 	body = fixServerToolUseInput(body)
 
