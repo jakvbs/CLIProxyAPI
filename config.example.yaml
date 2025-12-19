@@ -297,3 +297,38 @@ oauth-model-alias:
 #           protocol: "codex" # restricts the rule to a specific protocol, options: openai, gemini, claude, codex
 #       params: # JSON path (gjson/sjson syntax) -> raw JSON value (strings are used as-is, must be valid JSON)
 #         "response_format": "{\"type\":\"json_schema\",\"json_schema\":{\"name\":\"answer\",\"schema\":{\"type\":\"object\"}}}"
+#
+# Query-based array element selection (gjson syntax):
+# Use #(field==value) to select array elements by field value instead of index.
+# Modifies ALL matching elements. Supports nested queries.
+#
+# payload:
+#   override:
+#     - models:
+#         - name: "claude-*"
+#       params:
+#         # Modify description of tool named "Read"
+#         'tools.#(name=="Read").description': "Read files from filesystem"
+#
+#         # Add cache_control to all MCP tools (wildcard matching)
+#         'tools.#(name%"mcp_*").cache_control.type': "ephemeral"
+#
+#         # Nested query - modify parameter in specific tool
+#         'tools.#(name=="Bash").parameters.properties.#(type=="string").maxLength': 10000
+#
+#         # Query with dots in value (properly escaped in quotes)
+#         'tools.#(name=="mcp.filesystem").enabled': false
+#
+#   default:
+#     - models:
+#         - name: "*"
+#       params:
+#         # Add timeout only if it doesn't exist
+#         'tools.#(type=="function").timeout': 30
+#
+# Supported query operators:
+#   #(field==value)    - exact match
+#   #(field%"pattern") - wildcard match (e.g., "mcp_*")
+#   #(field!=value)    - not equal
+#   #(field>value)     - greater than (numbers)
+#   #(==value)         - match primitive arrays (e.g., ["a","b","c"])
