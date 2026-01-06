@@ -9,6 +9,12 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+// applyPayloadConfig is a test helper that wraps applyPayloadConfigWithRoot
+// with empty protocol, root, and original parameters for simpler test cases.
+func applyPayloadConfig(cfg *config.Config, model string, payload []byte) []byte {
+	return applyPayloadConfigWithRoot(cfg, model, "", "", payload, nil)
+}
+
 // =============================================================================
 // isQuerySegment tests
 // =============================================================================
@@ -62,46 +68,46 @@ func TestIsQuerySegment(t *testing.T) {
 
 func TestParseQuerySegments_Basic(t *testing.T) {
 	tests := []struct {
-		name           string
-		path           string
-		wantSegments   []string
-		wantQueryIdx   []int
-		wantErr        bool
+		name         string
+		path         string
+		wantSegments []string
+		wantQueryIdx []int
+		wantErr      bool
 	}{
 		{
-			name:           "simple path no query",
-			path:           "tools.0.name",
-			wantSegments:   []string{"tools", "0", "name"},
-			wantQueryIdx:   nil,
-			wantErr:        false,
+			name:         "simple path no query",
+			path:         "tools.0.name",
+			wantSegments: []string{"tools", "0", "name"},
+			wantQueryIdx: nil,
+			wantErr:      false,
 		},
 		{
-			name:           "single query segment",
-			path:           `tools.#(name=="Read").description`,
-			wantSegments:   []string{"tools", `#(name=="Read")`, "description"},
-			wantQueryIdx:   []int{1},
-			wantErr:        false,
+			name:         "single query segment",
+			path:         `tools.#(name=="Read").description`,
+			wantSegments: []string{"tools", `#(name=="Read")`, "description"},
+			wantQueryIdx: []int{1},
+			wantErr:      false,
 		},
 		{
-			name:           "nested queries",
-			path:           `tools.#(name=="Read").params.#(type=="string")`,
-			wantSegments:   []string{"tools", `#(name=="Read")`, "params", `#(type=="string")`},
-			wantQueryIdx:   []int{1, 3},
-			wantErr:        false,
+			name:         "nested queries",
+			path:         `tools.#(name=="Read").params.#(type=="string")`,
+			wantSegments: []string{"tools", `#(name=="Read")`, "params", `#(type=="string")`},
+			wantQueryIdx: []int{1, 3},
+			wantErr:      false,
 		},
 		{
-			name:           "query at start",
-			path:           `#(name=="Read").description`,
-			wantSegments:   []string{`#(name=="Read")`, "description"},
-			wantQueryIdx:   []int{0},
-			wantErr:        false,
+			name:         "query at start",
+			path:         `#(name=="Read").description`,
+			wantSegments: []string{`#(name=="Read")`, "description"},
+			wantQueryIdx: []int{0},
+			wantErr:      false,
 		},
 		{
-			name:           "query at end",
-			path:           `tools.#(name=="Read")`,
-			wantSegments:   []string{"tools", `#(name=="Read")`},
-			wantQueryIdx:   []int{1},
-			wantErr:        false,
+			name:         "query at end",
+			path:         `tools.#(name=="Read")`,
+			wantSegments: []string{"tools", `#(name=="Read")`},
+			wantQueryIdx: []int{1},
+			wantErr:      false,
 		},
 	}
 
