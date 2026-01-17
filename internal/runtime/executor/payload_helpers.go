@@ -13,10 +13,6 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-func applyPayloadConfig(cfg *config.Config, model string, payload []byte) []byte {
-	return applyPayloadConfigWithRoot(cfg, model, "", "", payload, nil)
-}
-
 // applyPayloadConfigWithRoot behaves like applyPayloadConfig but treats all parameter
 // paths as relative to the provided root path (for example, "request" for Gemini CLI)
 // and restricts matches to the given protocol when supplied. Defaults are checked
