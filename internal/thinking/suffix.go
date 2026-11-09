@@ -43,6 +43,12 @@ func ParseSuffix(model string) SuffixResult {
 	}
 }
 
+// HasThinkingSuffix reports whether the model suffix defines a thinking configuration.
+func HasThinkingSuffix(model string) bool {
+	result := ParseSuffix(model)
+	return result.HasSuffix && hasThinkingConfig(parseSuffixToConfig(result.RawSuffix, "", result.ModelName))
+}
+
 // ParseNumericSuffix attempts to parse a raw suffix as a numeric budget value.
 //
 // This function parses the raw suffix content (from ParseSuffix.RawSuffix) as an integer.
@@ -109,7 +115,7 @@ func ParseSpecialSuffix(rawSuffix string) (mode ThinkingMode, ok bool) {
 // ParseLevelSuffix attempts to parse a raw suffix as a discrete thinking level.
 //
 // This function parses the raw suffix content (from ParseSuffix.RawSuffix) as a level.
-// Only discrete effort levels are valid: minimal, low, medium, high, xhigh.
+// Only discrete effort levels are valid: minimal, low, medium, high, xhigh, max.
 // Level matching is case-insensitive.
 //
 // Special values (none, auto) are NOT handled by this function; use ParseSpecialSuffix
@@ -140,6 +146,8 @@ func ParseLevelSuffix(rawSuffix string) (level ThinkingLevel, ok bool) {
 		return LevelHigh, true
 	case "xhigh":
 		return LevelXHigh, true
+	case "max":
+		return LevelMax, true
 	default:
 		return "", false
 	}

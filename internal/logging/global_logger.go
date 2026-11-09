@@ -6,23 +6,44 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/gin-gonic/gin"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/util"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 var (
 	setupOnce      sync.Once
-	writerMu       sync.Mutex
+	writerMu       sync.RWMutex
+	consoleMu      sync.Mutex
 	logWriter      *lumberjack.Logger
 	ginInfoWriter  *io.PipeWriter
 	ginErrorWriter *io.PipeWriter
+	consoleWriter  io.Writer = os.Stderr
 )
+
+func init() {
+	config.SetV8MigrationWarnFunc(logV8MigrationWarning)
+}
+
+func logV8MigrationWarning(section, msg string) {
+	writerMu.RLock()
+	defer writerMu.RUnlock()
+
+	log.Warn(msg)
+	if logWriter != nil {
+		consoleMu.Lock()
+		if consoleWriter != nil {
+			_, _ = fmt.Fprintf(consoleWriter, "WARNING: %s\n", msg)
+		}
+		consoleMu.Unlock()
+	}
+}
 
 // LogFormatter defines a custom log format for logrus.
 // This formatter adds timestamp, level, request ID, and source location to each log entry.
@@ -30,7 +51,42 @@ var (
 type LogFormatter struct{}
 
 // logFieldOrder defines the display order for common log fields.
-var logFieldOrder = []string{"provider", "model", "mode", "budget", "level", "original_value", "min", "max", "clamped_to", "error"}
+var logFieldOrder = []string{
+	"provider", "model",
+	"plugin_id", "plugin_name", "source_id",
+	"version", "active_version", "retired_version", "overwritten",
+	"mode", "budget", "level", "original_mode", "original_value", "min", "max", "clamped_to", "error",
+	"credential", "auth_id", "auth_index", "connection", "proxy_scheme", "remote_transport",
+	"operation", "upstream_host", "reused", "was_idle", "idle_time",
+	"media_session_id", "call_id", "peer", "state", "reason",
+}
+
+var quotedLogFields = map[string]struct{}{
+	"credential":       {},
+	"auth_id":          {},
+	"auth_index":       {},
+	"upstream_host":    {},
+	"operation":        {},
+	"connection":       {},
+	"proxy_scheme":     {},
+	"remote_transport": {},
+	"media_session_id": {},
+	"call_id":          {},
+	"peer":             {},
+	"state":            {},
+	"reason":           {},
+}
+
+var pluginPathFieldOrder = []string{"path", "active_path", "retired_path"}
+
+func formatLogFieldValue(key string, value any) string {
+	if _, quoted := quotedLogFields[key]; quoted {
+		if stringValue, ok := value.(string); ok {
+			return strconv.Quote(stringValue)
+		}
+	}
+	return fmt.Sprint(value)
+}
 
 // Format renders a single log entry with custom formatting.
 func (m *LogFormatter) Format(entry *log.Entry) ([]byte, error) {
@@ -46,7 +102,7 @@ func (m *LogFormatter) Format(entry *log.Entry) ([]byte, error) {
 
 	reqID := "--------"
 	if id, ok := entry.Data["request_id"].(string); ok && id != "" {
-		reqID = id
+		reqID = ShortRequestID(id)
 	}
 
 	level := entry.Level.String()
@@ -61,7 +117,14 @@ func (m *LogFormatter) Format(entry *log.Entry) ([]byte, error) {
 		var fields []string
 		for _, k := range logFieldOrder {
 			if v, ok := entry.Data[k]; ok {
-				fields = append(fields, fmt.Sprintf("%s=%v", k, v))
+				fields = append(fields, fmt.Sprintf("%s=%s", k, formatLogFieldValue(k, v)))
+			}
+		}
+		if pluginID, ok := entry.Data["plugin_id"]; ok && strings.TrimSpace(fmt.Sprint(pluginID)) != "" {
+			for _, k := range pluginPathFieldOrder {
+				if v, ok := entry.Data[k]; ok {
+					fields = append(fields, fmt.Sprintf("%s=%v", k, v))
+				}
 			}
 		}
 		if len(fields) > 0 {
@@ -121,6 +184,27 @@ func isDirWritable(dir string) bool {
 	return true
 }
 
+// ResolveLogDirectory determines the directory used for application logs.
+func ResolveLogDirectory(cfg *config.Config) string {
+	logDir := "logs"
+	if base := util.WritablePath(); base != "" {
+		return filepath.Join(base, "logs")
+	}
+	if cfg == nil {
+		return logDir
+	}
+	if !isDirWritable(logDir) {
+		authDir, err := util.ResolveAuthDir(cfg.AuthDir)
+		if err != nil {
+			log.Warnf("Failed to resolve auth-dir %q for log directory: %v", cfg.AuthDir, err)
+		}
+		if authDir != "" {
+			logDir = filepath.Join(authDir, "logs")
+		}
+	}
+	return logDir
+}
+
 // ConfigureLogOutput switches the global log destination between rotating files and stdout.
 // When logsMaxTotalSizeMB > 0, a background cleaner removes the oldest log files in the logs directory
 // until the total size is within the limit.
@@ -130,12 +214,7 @@ func ConfigureLogOutput(cfg *config.Config) error {
 	writerMu.Lock()
 	defer writerMu.Unlock()
 
-	logDir := "logs"
-	if base := util.WritablePath(); base != "" {
-		logDir = filepath.Join(base, "logs")
-	} else if !isDirWritable(logDir) {
-		logDir = filepath.Join(cfg.AuthDir, "logs")
-	}
+	logDir := ResolveLogDirectory(cfg)
 
 	protectedPath := ""
 	if cfg.LoggingToFile {
