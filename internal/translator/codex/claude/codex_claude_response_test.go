@@ -97,6 +97,9 @@ func TestConvertCodexResponseToClaude_StreamCyberPolicyError(t *testing.T) {
 	if got := payload.Get("error.message").String(); got != "This content was flagged for possible cybersecurity risk." {
 		t.Fatalf("error.message = %q. Payload: %s", got, payload.Raw)
 	}
+	if got := payload.Get("error.code").String(); got != "cyber_policy" {
+		t.Fatalf("error.code = %q, want cyber_policy. Payload: %s", got, payload.Raw)
+	}
 }
 
 func TestConvertCodexResponseToClaude_StreamErrorTypeFallbackMessage(t *testing.T) {
@@ -117,6 +120,9 @@ func TestConvertCodexResponseToClaude_StreamErrorTypeFallbackMessage(t *testing.
 	}
 	if got := payload.Get("error.message").String(); got != "overloaded_error" {
 		t.Fatalf("error.message = %q, want overloaded_error. Payload: %s", got, payload.Raw)
+	}
+	if payload.Get("error.code").Exists() {
+		t.Fatalf("error.code present for an upstream error without a code. Payload: %s", payload.Raw)
 	}
 }
 

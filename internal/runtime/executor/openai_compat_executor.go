@@ -1278,6 +1278,9 @@ type statusErr struct {
 	transientRateLimit bool
 	// diagnostic is a content-free detail for logs only; it never reaches clients.
 	diagnostic string
+	// upstreamCode is the provider's error code when msg no longer holds the
+	// upstream body it came from.
+	upstreamCode string
 }
 
 func (e statusErr) Error() string {
@@ -1289,6 +1292,10 @@ func (e statusErr) Error() string {
 func (e statusErr) StatusCode() int            { return e.code }
 func (e statusErr) RetryAfter() *time.Duration { return e.retryAfter }
 func (e statusErr) IsCredentialScoped() bool   { return e.credentialScoped }
+
+// UpstreamErrorCode lets handlers put the provider's error code in the client
+// error when msg is not the upstream body.
+func (e statusErr) UpstreamErrorCode() string { return e.upstreamCode }
 
 // LogDiagnostic lets upstream failure logs explain a sanitized client message.
 func (e statusErr) LogDiagnostic() string { return e.diagnostic }

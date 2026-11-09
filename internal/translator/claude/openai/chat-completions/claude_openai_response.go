@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/MoeForge/moego/ojson"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/clienterror"
 	translatorcommon "github.com/router-for-me/CLIProxyAPI/v8/internal/translator/common"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
 )
@@ -315,6 +316,9 @@ func ConvertClaudeResponseToOpenAI(_ context.Context, modelName string, original
 			errorDoc := ojson.NewDoc([]byte(`{"error":{"message":"","type":""}}`))
 			_ = errorDoc.Set("error.message", errorData.Get("message").String())
 			_ = errorDoc.Set("error.type", errorData.Get("type").String())
+			if code := clienterror.UpstreamErrorCode(root); code != "" {
+				_ = errorDoc.Set("error.code", code)
+			}
 			return [][]byte{errorDoc.Bytes()}
 		}
 		return [][]byte{}

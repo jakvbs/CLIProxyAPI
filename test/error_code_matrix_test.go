@@ -466,7 +466,7 @@ func TestUpstreamErrorCodeMatrix(t *testing.T) {
 				t.Errorf("%s: error object %v does not carry %q in the %s field", name, errorObject, matrixCode, c.format)
 			}
 		}
-		if gotStripped, baseStripped := stripMatrixCode(c.cell.Body), stripMatrixCode(base.Body); gotStripped != baseStripped {
+		if gotStripped, baseStripped := stripMatrixCode(c.cell.Body, nil), stripMatrixCode(base.Body, statusDerivedCodes); gotStripped != baseStripped {
 			t.Errorf("%s: with the code removed, differs from 681ce41b\n got: %s\nwant: %s", name, gotStripped, baseStripped)
 		}
 		carried++
@@ -546,13 +546,26 @@ func errorObjectCarriesCode(errorObject map[string]any, format string) bool {
 	return false
 }
 
-// stripMatrixCode removes the matrix code wherever a client format may carry
-// it and re-encodes each document with sorted keys, so a body with the code
-// can be compared with one from a build that dropped it.
-func stripMatrixCode(body string) string {
+// statusDerivedCodes are the error.code values CPA derives from the HTTP
+// status when an error text is not JSON (handlers.BuildErrorResponseBody).
+// They only stand in for a missing code, so the provider's code replaces them.
+var statusDerivedCodes = map[string]bool{
+	"invalid_api_key":       true,
+	"insufficient_quota":    true,
+	"rate_limit_exceeded":   true,
+	"model_not_found":       true,
+	"request_timeout":       true,
+	"internal_server_error": true,
+}
+
+// stripMatrixCode removes the matrix code, and any code in replaced, wherever
+// a client format may carry it, and re-encodes each document with sorted
+// keys, so a body with the code can be compared with one from a build that
+// dropped it.
+func stripMatrixCode(body string, replaced map[string]bool) string {
 	var whole map[string]any
 	if json.Unmarshal([]byte(body), &whole) == nil {
-		return encodeStripped(whole)
+		return encodeStripped(whole, replaced)
 	}
 	lines := strings.Split(body, "\n")
 	for i, line := range lines {
@@ -562,19 +575,19 @@ func stripMatrixCode(body string) string {
 		}
 		var doc map[string]any
 		if json.Unmarshal([]byte(strings.TrimSpace(payload)), &doc) == nil {
-			lines[i] = "data: " + encodeStripped(doc)
+			lines[i] = "data: " + encodeStripped(doc, replaced)
 		}
 	}
 	return strings.Join(lines, "\n")
 }
 
-func encodeStripped(doc map[string]any) string {
+func encodeStripped(doc map[string]any, replaced map[string]bool) string {
 	for _, holder := range []map[string]any{doc, asObject(doc["response"]), asObject(doc["interaction"])} {
 		errorObject := asObject(holder["error"])
 		if errorObject == nil {
 			continue
 		}
-		if code, _ := errorObject["code"].(string); code == matrixCode {
+		if code, _ := errorObject["code"].(string); code == matrixCode || replaced[code] {
 			delete(errorObject, "code")
 		}
 		if details, ok := errorObject["details"].([]any); ok {
@@ -622,5 +635,42 @@ func writeErrorCodeBaseline(t *testing.T, cells map[string]errorCodeCell) {
 	}
 	if errWrite := os.WriteFile(errorCodeMatrixBaselinePath, []byte(b.String()), 0o644); errWrite != nil {
 		t.Fatal(errWrite)
+	}
+}
+
+// TestCodexCyberPolicyCodeReachesClaudeMessages sends Codex's cyber_policy
+// refusal, as an error event and as a response.failed event, through
+// /v1/messages: the Claude error must carry error.code "cyber_policy" with the
+// status, type and message the client got at 681ce41b. The handler passes
+// Codex's own type "invalid_request" through; only the translator, which
+// this HTTP path does not reach, maps it to "invalid_request_error".
+func TestCodexCyberPolicyCodeReachesClaudeMessages(t *testing.T) {
+	const message = "This content was flagged for possible cybersecurity risk."
+	const refusal = `{"type":"invalid_request","code":"cyber_policy","message":"` + message + `","param":null}`
+	events := []errorCodeUpstream{
+		{name: "error", inStream: true, respond: func(w http.ResponseWriter, _ bool) {
+			writeSSE(w, `data: {"type":"error","error":`+refusal+`,"sequence_number":3}`+"\n\n")
+		}},
+		{name: "response.failed", inStream: true, respond: func(w http.ResponseWriter, _ bool) {
+			writeSSE(w, `data: {"type":"response.failed","response":{"id":"resp_cyber","status":"failed","error":`+refusal+`},"sequence_number":3}`+"\n\n")
+		}},
+	}
+	codex := errorCodeProviders()[0]
+	claude := errorCodeClientFormats()[0]
+	for _, event := range events {
+		for _, stream := range []bool{false, true} {
+			cell, ok := runErrorCodeCell(t, codex, event, claude, stream, true)
+			if !ok {
+				t.Fatalf("%s stream=%t: the Codex request did not stream", event.name, stream)
+			}
+			errorObjects := errorObjectsIn(cell.Body)
+			if len(errorObjects) != 1 {
+				t.Fatalf("%s stream=%t: want one error object, body %s", event.name, stream, cell.Body)
+			}
+			got := errorObjects[0]
+			if got["code"] != "cyber_policy" || got["type"] != "invalid_request" || got["message"] != message || cell.Status != http.StatusBadRequest {
+				t.Errorf("%s stream=%t: status %d, error %v; want 400 with code cyber_policy, type invalid_request and the upstream message", event.name, stream, cell.Status, got)
+			}
+		}
 	}
 }
