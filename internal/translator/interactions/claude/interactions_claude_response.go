@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/MoeForge/moego/ojson"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/clienterror"
 	translatorcommon "github.com/router-for-me/CLIProxyAPI/v8/internal/translator/common"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
 )
@@ -329,6 +330,9 @@ func appendClaudeError(out [][]byte, root ojson.Result, st *interactionsToClaude
 	payloadDoc := ojson.NewDocString(`{"type":"error","error":{"type":"","message":""}}`)
 	_ = payloadDoc.Set("error.type", errType)
 	_ = payloadDoc.Set("error.message", msg)
+	if code := clienterror.UpstreamErrorCode(root); code != "" {
+		_ = payloadDoc.Set("error.code", code)
+	}
 	return append(out, translatorcommon.AppendSSEEventBytes(nil, "error", payloadDoc.Bytes(), 3))
 }
 

@@ -541,8 +541,11 @@ func (h *ClaudeCodeAPIHandler) forwardClaudeStreamWithState(c *gin.Context, flus
 }
 
 type claudeErrorDetail struct {
-	Type    string              `json:"type"`
-	Message string              `json:"message"`
+	Type    string `json:"type"`
+	Message string `json:"message"`
+	// Code is the upstream provider's error code. Claude errors define no code
+	// field, so it goes in error.code, where OpenAI clients also look.
+	Code    string              `json:"code,omitempty"`
 	Details *claudeErrorDetails `json:"details,omitempty"`
 }
 
@@ -590,11 +593,16 @@ func (h *ClaudeCodeAPIHandler) toClaudeErrorWithRetryAfter(msg *interfaces.Error
 			}
 		}
 	}
+	code := clienterror.UpstreamErrorCodeFromText(errText)
+	if code == "" && msg != nil {
+		code = clienterror.UpstreamErrorCodeFromError(msg.Error)
+	}
 	response := claudeErrorResponse{
 		Type: "error",
 		Error: claudeErrorDetail{
 			Type:    errType,
 			Message: message,
+			Code:    code,
 		},
 	}
 	if clienterror.IsClaudeThreadNotFound(status, errors.New(errText)) {

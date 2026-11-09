@@ -421,6 +421,9 @@ func codexStreamErrorToClaudeError(rootResult ojson.Result) []byte {
 	outDoc := ojson.NewDocString(`{"type":"error","error":{"type":"api_error","message":""}}`)
 	_ = outDoc.Set("error.type", errType)
 	_ = outDoc.Set("error.message", message)
+	if code != "" {
+		_ = outDoc.Set("error.code", code)
+	}
 	return translatorcommon.AppendSSEEventBytes(nil, "error", outDoc.Bytes(), 2)
 }
 

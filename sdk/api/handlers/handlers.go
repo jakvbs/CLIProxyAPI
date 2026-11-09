@@ -17,6 +17,7 @@ import (
 	"github.com/MoeForge/moego/ojson"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/clienterror"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/interfaces"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/thinking"
@@ -143,6 +144,10 @@ func BuildErrorResponseBodyWithError(status int, errText string, err error) []by
 			errType = "server_error"
 			code = "internal_server_error"
 		}
+	}
+
+	if upstreamCode := clienterror.UpstreamErrorCodeFromError(err); upstreamCode != "" {
+		code = upstreamCode
 	}
 
 	payload, errMarshal := json.Marshal(ErrorResponse{

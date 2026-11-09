@@ -13,6 +13,7 @@ import (
 
 	"github.com/MoeForge/moego/base64"
 	"github.com/MoeForge/moego/ojson"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/clienterror"
 	sigcompat "github.com/router-for-me/CLIProxyAPI/v8/internal/signature"
 	translatorcommon "github.com/router-for-me/CLIProxyAPI/v8/internal/translator/common"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
@@ -287,9 +288,12 @@ func ConvertClaudeResponseToGemini(_ context.Context, modelName string, original
 		}
 
 		// Create error response in Gemini format
-		errorResponse := []byte(`{"error":{"code":400,"message":"","status":"INVALID_ARGUMENT"}}`)
-		errorResponse, _ = ojson.SetBytes(errorResponse, "error.message", errorMsg)
-		return [][]byte{errorResponse}
+		errorDoc := ojson.NewDocString(`{"error":{"code":400,"message":"","status":"INVALID_ARGUMENT"}}`)
+		_ = errorDoc.Set("error.message", errorMsg)
+		if code := clienterror.UpstreamErrorCode(root); code != "" {
+			_ = errorDoc.SetRawBytes("error.details", clienterror.GeminiErrorInfoDetails(code))
+		}
+		return [][]byte{errorDoc.Bytes()}
 
 	default:
 		// Unknown event type, return empty response

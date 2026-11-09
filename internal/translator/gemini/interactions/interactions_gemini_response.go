@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/MoeForge/moego/ojson"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/clienterror"
 	translatorcommon "github.com/router-for-me/CLIProxyAPI/v8/internal/translator/common"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
 )
@@ -126,6 +127,9 @@ func convertInteractionsEventToGemini(modelName string, rawJSON []byte, st *inte
 		_ = errorResponseDoc.Set("error.code", statusCode)
 		_ = errorResponseDoc.Set("error.message", msg)
 		_ = errorResponseDoc.Set("error.status", statusText)
+		if code := clienterror.UpstreamErrorCode(root); code != "" {
+			_ = errorResponseDoc.SetRawBytes("error.details", clienterror.GeminiErrorInfoDetails(code))
+		}
 		return [][]byte{errorResponseDoc.Bytes()}
 	}
 	return nil
