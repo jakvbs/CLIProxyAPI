@@ -1,0 +1,30 @@
+name: fork-ci
+
+# The fork's trunk takes only commits this job passed: legible's `bun run land`
+# pushes a candidate to land/<sha>, waits for `check`, then fast-forwards main.
+on:
+  push:
+    branches:
+      - main
+      - land/**
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build
+        run: |
+          go build -o test-output ./cmd/server
+          rm -f test-output
+      - name: Test
+        run: go test ./...
