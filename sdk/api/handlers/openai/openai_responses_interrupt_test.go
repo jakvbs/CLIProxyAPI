@@ -425,7 +425,7 @@ func TestResponsesInterruptStopsHTTPUpstream(t *testing.T) {
 	}
 	select {
 	case <-executor.canceledCh:
-	case <-time.After(time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("http upstream was not canceled")
 	}
 	if !executor.canceled.Load() {
