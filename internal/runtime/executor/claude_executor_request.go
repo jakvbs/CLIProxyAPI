@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -2566,6 +2567,47 @@ func (resolver claudeMCPAliasResolver) restorePassthroughWrapped(tail string) (s
 	return "", false
 }
 
+// resolveUnprefixed recovers a drift that dropped the mcp__ prefix and kept only
+// alias words before the semantic name: "wheel_bash" for the alias
+// "mcp__vendor_cannon__wheel_bash" of "bash", or a virtual-server word such as
+// "vendor_bash". It restores only when exactly one aliased tool matches and no
+// client tool already carries that name.
+func (resolver claudeMCPAliasResolver) resolveUnprefixed(name string) (string, bool) {
+	matched := ""
+	matches := 0
+	for _, entry := range resolver.aliases {
+		if entry.original == name {
+			return "", false
+		}
+		prefix, ok := strings.CutSuffix(name, "_"+entry.parts.semantic)
+		if !ok || !claudeMCPPrefixIsAliasWords(prefix, entry.parts) {
+			continue
+		}
+		matched = entry.original
+		matches++
+	}
+	if matches != 1 {
+		if matches > 1 {
+			log.Debugf("claude oauth mcp alias: unprefixed tool name %q matches %d declared tools; forwarding it unchanged", name, matches)
+		}
+		return "", false
+	}
+	log.Debugf("claude oauth mcp alias: recovered unprefixed drifted tool name %q as %q via alias words", name, matched)
+	return matched, true
+}
+
+// claudeMCPPrefixIsAliasWords reports whether every word of prefix is a word of
+// the alias's virtual server or its tool ID.
+func claudeMCPPrefixIsAliasWords(prefix string, parts claudeMCPAliasParts) bool {
+	words := append(strings.Split(parts.server, "_"), parts.toolID)
+	for _, word := range strings.Split(prefix, "_") {
+		if !slices.Contains(words, word) {
+			return false
+		}
+	}
+	return true
+}
+
 func parseClaudeMCPAlias(name string) (claudeMCPAliasParts, bool) {
 	if !helps.IsClaudeMCPToolName(name) {
 		return claudeMCPAliasParts{}, false
@@ -2619,6 +2661,10 @@ func (resolver claudeMCPAliasResolver) resolve(name string) (string, bool, error
 			return "", false, nil
 		}
 		return original, true, nil
+	}
+	if !strings.HasPrefix(name, "mcp__") {
+		original, ok := resolver.resolveUnprefixed(name)
+		return original, ok, nil
 	}
 
 	server := claudeMCPAliasServer(name)
