@@ -1161,3 +1161,79 @@ func TestReverseRemapWrappedCallerMCPToolStaysAnErrorWhenAmbiguous(t *testing.T)
 		t.Fatalf("ambiguous wrapped tool error = %v, want matches multiple declared tools", errReverse)
 	}
 }
+
+// The model sometimes drops the mcp__<server>__ prefix and names a client tool
+// by alias words and its semantic name, as "wheel_bash" did for the alias
+// "mcp__vendor_cannon__wheel_bash" of "bash". Such a name restores only when
+// exactly one aliased tool of the request matches.
+func TestReverseRemapRestoresUnprefixedAliasDrift(t *testing.T) {
+	restore := func(t *testing.T, reverseMap map[string]string, name string) string {
+		t.Helper()
+		response := []byte(fmt.Sprintf(`{"content":[{"type":"tool_use","id":"toolu_1","name":%q,"input":{}}]}`, name))
+		restored, err := restoreClaudeOAuthToolNamesFromResponse(response, reverseMap)
+		if err != nil {
+			t.Fatalf("non-stream restore of %q: %v", name, err)
+		}
+		line := []byte(fmt.Sprintf(`data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":%q,"input":{}}}`, name))
+		restoredLine, err := restoreClaudeOAuthToolNamesFromStreamLine(line, reverseMap)
+		if err != nil {
+			t.Fatalf("stream restore of %q: %v", name, err)
+		}
+		got := ojson.GetBytes(restored, "content.0.name").String()
+		if gotStream := ojson.GetBytes(helps.JSONPayload(restoredLine), "content_block.name").String(); gotStream != got {
+			t.Fatalf("%q restored as %q in the stream but %q without it", name, gotStream, got)
+		}
+		return got
+	}
+	serverWords := func(t *testing.T, remapped []byte) (string, string) {
+		t.Helper()
+		parts, ok := parseClaudeMCPAlias(ojson.GetBytes(remapped, "tools.0.name").String())
+		if !ok {
+			t.Fatalf("tools.0.name is not an MCP alias")
+		}
+		first, second, ok := strings.Cut(parts.server, "_")
+		if !ok {
+			t.Fatalf("virtual server %q is not two words", parts.server)
+		}
+		return first, second
+	}
+
+	body := []byte(`{"tools":[{"name":"bash","input_schema":{"type":"object"}},{"name":"read","input_schema":{"type":"object"}}]}`)
+	remapped, reverseMap := remapOAuthToolNamesWithOptions(body, claudeMCPAliasOptions{secret: "unprefixed-drift-caller"})
+	first, second := serverWords(t, remapped)
+	bashParts, _ := parseClaudeMCPAlias(ojson.GetBytes(remapped, "tools.0.name").String())
+	readParts, _ := parseClaudeMCPAlias(ojson.GetBytes(remapped, "tools.1.name").String())
+	for name, want := range map[string]string{
+		bashParts.toolID + "_bash":     "bash",
+		readParts.toolID + "_bash":     readParts.toolID + "_bash",
+		first + "_bash":                "bash",
+		second + "_read":               "read",
+		first + "_" + second + "_bash": "bash",
+		"other_bash":                   "other_bash",
+		"bash_" + first:                "bash_" + first,
+	} {
+		if got := restore(t, reverseMap, name); got != want {
+			t.Errorf("%q restored as %q, want %q", name, got, want)
+		}
+	}
+
+	t.Run("ambiguous semantic stays unchanged", func(t *testing.T) {
+		body := []byte(`{"tools":[{"name":"read file","input_schema":{"type":"object"}},{"name":"read_file","input_schema":{"type":"object"}}]}`)
+		remapped, reverseMap := remapOAuthToolNamesWithOptions(body, claudeMCPAliasOptions{secret: "unprefixed-drift-caller"})
+		first, _ := serverWords(t, remapped)
+		if got := restore(t, reverseMap, first+"_read_file"); got != first+"_read_file" {
+			t.Fatalf("ambiguous drift restored as %q, want it unchanged", got)
+		}
+	})
+
+	t.Run("caller tool of that name stays unchanged", func(t *testing.T) {
+		probe, _ := remapOAuthToolNamesWithOptions(body, claudeMCPAliasOptions{secret: "unprefixed-drift-caller"})
+		first, _ := serverWords(t, probe)
+		own := first + "_bash"
+		body := []byte(fmt.Sprintf(`{"tools":[{"name":"bash","input_schema":{"type":"object"}},{"name":%q,"input_schema":{"type":"object"}}]}`, own))
+		_, reverseMap := remapOAuthToolNamesWithOptions(body, claudeMCPAliasOptions{secret: "unprefixed-drift-caller"})
+		if got := restore(t, reverseMap, own); got != own {
+			t.Fatalf("caller tool %q restored as %q, want it unchanged", own, got)
+		}
+	})
+}
